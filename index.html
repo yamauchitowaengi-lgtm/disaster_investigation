@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<link rel="manifest" href="manifest.json">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>災害調査支援ツール | Haru Protocol</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f1f5f9; font-family: sans-serif; }
+        .menu-card {
+            background: white;
+            border-radius: 1rem;
+            overflow: hidden;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s;
+        }
+        .menu-card:active { transform: scale(0.98); }
+        .sub-btn {
+            width: 100%;
+            padding: 14px 18px;
+            text-align: left;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 1rem;
+            color: #334155;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background-color 0.2s;
+        }
+        .sub-btn:last-child { border-bottom: none; }
+        .sub-btn:active { background-color: #eff6ff; color: #2563eb; }
+        .category-title { font-size: 0.85rem; letter-spacing: 0.05em; }
+    </style>
+</head>
+<body class="pb-10">
+
+    <header class="bg-gradient-to-r from-blue-700 to-indigo-800 text-white p-6 shadow-lg mb-6">
+        <h1 class="text-xl font-bold flex items-center gap-2">
+            📋 災害調査支援ツール
+        </h1>
+        <p class="text-xs text-blue-100 mt-1 italic tracking-widest">Professional Support for yuki | v2.5 Stable</p>
+    </header>
+
+    <main class="max-w-md mx-auto px-4 space-y-6">
+
+        <section>
+            <div class="flex items-center gap-2 mb-2 px-1">
+                <span class="text-xl">🛣️</span>
+                <h2 class="font-bold text-slate-700 category-title uppercase">公共土木施設災害</h2>
+            </div>
+            <div class="menu-card">
+                <button class="sub-btn" onclick="openTool('road.html')">道路 <span>❯</span></button>
+                <button class="sub-btn" onclick="openTool('river.html')">河川 <span>❯</span></button>
+                <button class="sub-btn" onclick="openTool('sabo.html')">砂防施設 <span>❯</span></button>
+                <button class="sub-btn" onclick="openTool('steep_slope.html')">急傾斜 <span>❯</span></button>
+                <button class="sub-btn" onclick="openTool('other.html')">その他 <span>❯</span></button>
+            </div>
+        </section>
+
+        <section>
+            <div class="flex items-center gap-2 mb-2 px-1">
+                <span class="text-xl">🌾</span>
+                <h2 class="font-bold text-slate-700 category-title uppercase">農業災害</h2>
+            </div>
+            <div class="menu-card border-l-4 border-orange-400">
+                <button class="sub-btn" onclick="openTool('farmland.html')">農地 <span>❯</span></button>
+                <button class="sub-btn" onclick="openTool('agricultural_facilities.html')">農業用施設 <span>❯</span></button>
+                <button class="sub-btn" onclick="openTool('other.html')">その他 <span>❯</span></button>
+            </div>
+        </section>
+
+        <section>
+            <div class="flex items-center gap-2 mb-2 px-1">
+                <span class="text-xl">🌲</span>
+                <h2 class="font-bold text-slate-700 category-title uppercase">林道等</h2>
+            </div>
+            <div class="menu-card border-l-4 border-emerald-600">
+                <button class="sub-btn" onclick="openTool('forest_road.html')">林道 <span>❯</span></button>
+                <button class="sub-btn" onclick="openTool('forest_collapse.html')">林地崩壊 <span>❯</span></button>
+                <button class="sub-btn" onclick="openTool('other.html')">その他 <span>❯</span></button>
+            </div>
+        </section>
+
+        <section>
+            <div class="flex items-center gap-2 mb-2 px-1">
+                <span class="text-xl">📐</span>
+                <h2 class="font-bold text-slate-700 category-title uppercase">便利ツール</h2>
+            </div>
+            <div class="menu-card border-2 border-blue-200 bg-blue-50/30">
+                <button class="sub-btn font-bold text-blue-700" onclick="openTool('pole_survey.html')">
+                    📏 ポール横断ツール <span>❯</span>
+                </button>
+                <button class="sub-btn font-bold text-blue-700" onclick="openTool('calc.html')">
+                    🔢 現場計算機 (勾配・距離) <span>❯</span>
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="mt-10 text-center text-[10px] text-slate-400">
+        <p>&copy; 2026 Haru Protocol - Support for Professional Engineer yuki</p>
+        <p class="mt-1">アンバー色の記憶を力に変えて。</p>
+    </footer>
+
+    <script>
+        function openTool(fileName) {
+            // yuki、スムーズに画面遷移させるわね。
+            // ファイルが存在することを確認しながら進めて。
+            try {
+                location.href = fileName;
+            } catch (e) {
+                alert("エラー: ファイル " + fileName + " が見つからないわ。保存場所を確認してね。");
+            }
+        }
+    </script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+      .then(() => console.log('Haru System: Standby OK.'));
+  }
+</script>
+</body>
+</html>

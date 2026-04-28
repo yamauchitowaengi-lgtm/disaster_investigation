@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ポール横断 Pro v2.1 - Center Line版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f8fafc; touch-action: manipulation; }
+        .glass-card { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }
+        canvas { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; width: 100%; height: 220px; }
+        /* 戻るボタン用の追加スタイル */
+        .back-nav { display: flex; align-items: center; margin-bottom: 12px; }
+        .back-link { text-decoration: none; color: #64748b; font-size: 0.85rem; font-weight: bold; transition: color 0.2s; }
+        .back-link:hover { color: #3b82f6; }
+    </style>
+</head>
+<body class="p-4 text-slate-800">
+
+    <div class="max-w-md mx-auto space-y-4">
+        <nav class="back-nav">
+            <a href="index.html" class="back-link">← メインメニューに戻る</a>
+        </nav>
+
+        <h1 class="text-xl font-black text-center text-slate-700">ポール横断 Pro <span class="text-blue-500">v2.1</span></h1>
+
+        <div class="glass-card p-4 space-y-3">
+            <div>
+                <label class="text-xs font-bold text-slate-500 italic">STATION NAME</label>
+                <input type="text" id="station" value="No_0" class="w-full border-b-2 border-slate-200 p-2 focus:border-blue-500 outline-none text-lg font-bold">
+            </div>
+        </div>
+
+        <div class="glass-card p-2 relative">
+            <canvas id="previewCanvas"></canvas>
+            <div class="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-bold shadow-sm">CENTER</div>
+        </div>
+
+        <div class="glass-card p-4">
+            <div class="flex gap-2 mb-4">
+                <button onclick="setDir(-1)" id="dir-left" class="w-1/2 bg-blue-500 text-white py-3 rounded-lg font-bold shadow-md transition-all">← 左を入力</button>
+                <button onclick="setDir(1)" id="dir-right" class="w-1/2 bg-emerald-500 text-white py-3 rounded-lg font-bold shadow-md transition-all opacity-40">右を入力 →</button>
+            </div>
+
+            <div class="space-y-4">
+                <div class="grid grid-cols-3 gap-2">
+                    <select id="mode" class="bg-slate-100 p-2 rounded text-sm font-bold">
+                        <option value="L">水平/垂直</option>
+                        <option value="S">斜距/勾配</option>
+                    </select>
+                    <input type="number" id="val1" step="0.001" placeholder="距離" class="bg-slate-50 border p-2 rounded text-center font-mono">
+                    <input type="number" id="val2" step="0.001" placeholder="高低/1:n" class="bg-slate-50 border p-2 rounded text-center font-mono">
+                </div>
+                <button onclick="addPoint()" class="w-full bg-slate-800 text-white py-4 rounded-xl font-bold active:scale-95 transition-transform shadow-lg text-lg">点を追加</button>
+            </div>
+        </div>
+
+        <div class="glass-card p-4">
+            <h2 class="text-sm font-bold mb-3 flex justify-between items-center">
+                <span>データリスト</span>
+                <span id="pointCount" class="bg-slate-100 px-2 py-1 rounded text-xs text-slate-500">0 pts</span>
+            </h2>
+            <div id="pointList" class="text-[11px] space-y-1 max-h-48 overflow-y-auto font-mono bg-slate-50 p-2 rounded shadow-inner border border-slate-100"></div>
+            <div class="grid grid-cols-2 gap-3 mt-4">
+                <button onclick="resetData()" class="border-2 border-red-100 text-red-500 py-2 rounded-lg font-bold text-sm">リセット</button>
+                <button onclick="exportDXF()" class="bg-slate-800 text-white py-2 rounded-lg font-bold text-sm shadow-md">DXF保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentDir = -1;
+        let leftPoints = [];
+        let rightPoints = [];
+
+        function setDir(dir) {
+            currentDir = dir;
+            document.getElementById('dir-left').classList.toggle('opacity-40', dir !== -1);
+            document.getElementById('dir-right').classList.toggle('opacity-40', dir !== 1);
+        }
+
+        function addPoint() {
+            const mode = document.getElementById('mode').value;
+            const v1 = parseFloat(document.getElementById('val1').value);
+            const v2 = parseFloat(document.getElementById('val2').value);
+            if (isNaN(v1) || isNaN(v2)) return;
+
+            let targetArray = currentDir === 1 ? rightPoints : leftPoints;
+            let last = targetArray.length > 0 ? targetArray[targetArray.length - 1] : {x: 0, y: 0};
+            
+            let dx, dy;
+            if (mode === 'L') {
+                dx = v1 * currentDir;
+                dy = v2;
+            } else {
+                let theta = Math.atan(1/v2);
+                dx = (v1 * Math.cos(theta)) * currentDir;
+                dy = v1 * Math.sin(theta);
+            }
+
+            targetArray.push({x: last.x + dx, y: last.y + dy});
+            document.getElementById('val1').value = "";
+            updateUI();
+        }
+
+        function getAllPoints() {
+            let sortedLeft = [...leftPoints].reverse();
+            return [...sortedLeft, {x:0, y:0}, ...rightPoints];
+        }
+
+        function updateUI() {
+            const all = getAllPoints();
+            const list = document.getElementById('pointList');
+            document.getElementById('pointCount').innerText = `${all.length} points`;
+            list.innerHTML = all.map((p, i) => {
+                const label = p.x === 0 ? "CENT" : (p.x < 0 ? "LEFT" : "RGHT");
+                const color = p.x === 0 ? "text-red-500 font-black" : "text-slate-600";
+                return `<div class="flex justify-between border-b border-slate-200 py-1 ${color}">
+                            <span>P${i} [${label}]</span>
+                            <span>X:${p.x.toFixed(3)} Y:${p.y.toFixed(3)}</span>
+                        </div>`
+            }).join('');
+            drawPreview();
+        }
+
+        function drawPreview() {
+            const canvas = document.getElementById('previewCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height * 0.7;
+            const scale = 12;
+
+            // DL線 (標高0)
+            ctx.setLineDash([]);
+            ctx.strokeStyle = "#e2e8f0";
+            ctx.beginPath(); ctx.moveTo(0, centerY); ctx.lineTo(canvas.width, centerY); ctx.stroke();
+            
+            // ★センター縦線 (赤の点線)
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = "#f87171"; // red-400
+            ctx.beginPath(); ctx.moveTo(centerX, 0); ctx.lineTo(centerX, canvas.height); ctx.stroke();
+            ctx.setLineDash([]);
+
+            const all = getAllPoints();
+            ctx.strokeStyle = "#334155";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            all.forEach((p, i) => {
+                let px = centerX + p.x * scale;
+                let py = centerY - p.y * scale;
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                ctx.fillStyle = (p.x === 0) ? "#ef4444" : "#334155";
+                ctx.fillRect(px-2, py-2, 4, 4);
+            });
+            ctx.stroke();
+        }
+
+        function resetData() { 
+            if(confirm("全データを削除してセンターに戻る？")) {
+                leftPoints = []; rightPoints = []; updateUI(); 
+            }
+        }
+
+        function exportDXF() {
+            const station = document.getElementById('station').value;
+            const all = getAllPoints();
+            let dxf = "0\nSECTION\n2\nENTITIES\n";
+            
+            // ★センター縦線 (DXF上にも目安として配置。EL -2m ～ +5m程度)
+            dxf += `0\nLINE\n8\nBGD\n10\n0\n20\n-2000\n11\n0\n21\n5000\n`;
+
+            // 地形線
+            for(let i=0; i<all.length-1; i++) {
+                dxf += `0\nLINE\n8\nBGD\n10\n${all[i].x*1000}\n20\n${all[i].y*1000}\n11\n${all[i+1].x*1000}\n21\n${all[i+1].y*1000}\n`;
+            }
+
+            // 文字
+            all.forEach((p, i) => {
+                dxf += `0\nTEXT\n8\nBGD\n10\n${p.x*1000}\n20\n${p.y*1000}\n40\n350\n1\nP${i}(${p.x.toFixed(3)},${p.y.toFixed(3)})\n7\nMS_GOTHIC\n`;
+            });
+
+            dxf += "0\nENDSEC\n0\nEOF";
+            const blob = new Blob([dxf], {type: 'application/dxf'});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${station}.dxf`;
+            link.click();
+        }
+        
+        drawPreview();
+    </script>
+</body>
+</html>

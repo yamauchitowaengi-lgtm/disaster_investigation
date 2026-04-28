@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>災害査定支援 Pro v1.6 (砂防)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .canvas-container { position: relative; touch-action: none; background: #333; overflow: hidden; }
+        canvas { width: 100%; border-radius: 0.5rem; background: #fff; touch-action: none; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .active-tab { border-bottom: 4px solid #b91c1c; color: #b91c1c; }
+        @media print { 
+            .no-print { display: none !important; }
+            body { background: white !important; padding-bottom: 0 !important; }
+            .card { break-inside: avoid; border: 1px solid #ccc; margin-bottom: 1rem; }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 pb-20 text-slate-800">
+
+    <header class="bg-stone-700 text-white p-4 shadow-md sticky top-0 z-50 flex justify-between items-center no-print">
+        <div class="flex items-center gap-2">
+            <a href="index.html" class="bg-stone-800 hover:bg-stone-900 text-white p-2 rounded-lg text-xs transition-colors">◀ 戻る</a>
+            <h1 class="text-sm font-bold italic">⛰️ 災害調査支援: 砂防</h1>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="clearAllData()" class="bg-stone-900 text-white px-3 py-1 rounded-full text-xs">全消去</button>
+            <button onclick="exportPDF()" class="bg-white text-stone-700 px-4 py-1 rounded-full font-bold text-sm shadow">PDF出力</button>
+        </div>
+    </header>
+
+    <nav class="flex bg-white shadow-sm sticky top-[60px] z-40 no-print border-b">
+        <button id="tabBtn1" onclick="switchTab(1)" class="flex-1 py-3 font-bold active-tab">⛰️ 被災箇所</button>
+        <button id="tabBtn2" onclick="switchTab(2)" class="flex-1 py-3 font-bold text-slate-400">🏗️ 仮設計画</button>
+    </nav>
+
+    <main class="p-2 sm:p-4 max-w-3xl mx-auto">
+        
+        <section id="tab1" class="tab-content active space-y-4">
+            <div class="card bg-white p-3 rounded-xl shadow border">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-sm font-bold text-stone-600">被災全景写真（寸法線・描き込み）</h3>
+                    <div class="flex gap-1 no-print">
+                        <button onclick="undo('canvas1')" class="bg-gray-100 border px-3 py-1 rounded text-xs">↩︎</button>
+                        <button onclick="redo('canvas1')" class="bg-gray-100 border px-3 py-1 rounded text-xs">↪︎</button>
+                        <button onclick="clearCanvas('canvas1')" class="bg-gray-100 border px-2 py-1 rounded text-xs text-red-500">消去</button>
+                    </div>
+                </div>
+                <input type="file" id="file1" accept="image/*" capture="camera" onchange="initCanvas(this, 'canvas1')" class="text-xs mb-2 no-print w-full">
+                <div class="canvas-container" id="container1">
+                    <canvas id="canvas1"></canvas>
+                </div>
+            </div>
+
+            <div class="card bg-white p-4 rounded-xl shadow space-y-4 text-sm auto-save-form">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="col-span-2">現場名：<input type="text" id="siteName" class="save w-full border-b-2 border-stone-100 p-1 bg-stone-50 focus:bg-white outline-none font-bold" placeholder="現場名を入力してください"></div>
+                    <div>被災施設：
+                        <select id="facilityType" onchange="toggleOther(this, 'facilityOther')" class="save w-full border-b p-1 outline-none">
+                            <option>堰堤</option><option>前庭保護工</option><option>渓流保全工</option><option>床固め</option><option>除石</option><option>その他</option>
+                        </select>
+                        <input type="text" id="facilityOther" placeholder="施設名を入力" class="save hidden w-full border-b mt-1 p-1">
+                    </div>
+                    <div>位置：<select id="position" class="save w-full border-b p-1 outline-none"><option>左岸</option><option>右岸</option><option>両岸</option></select></div>
+                    <div class="col-span-2 flex items-end gap-2">
+                        <div class="flex-1">被災延長(m)：<input type="number" id="lengthInput" step="0.1" class="save w-full border-b-2 border-red-100 p-1 bg-red-50 outline-none font-bold text-red-700" placeholder="0.0"></div>
+                        <button onclick="toggleArrow()" class="no-print bg-red-600 text-white px-3 py-2 rounded-lg font-bold text-xs shadow-md active:scale-95 transition-transform">寸法線を表示</button>
+                    </div>
+                </div>
+
+                <div class="border-t pt-2">
+                    <p class="font-bold text-[10px] text-gray-400 mb-2 uppercase tracking-widest">Station Points</p>
+                    <div class="flex items-center gap-2 mb-2">起点：<span class="font-mono bg-gray-100 px-2 py-1 rounded text-gray-500 text-xs">NO.0</span></div>
+                    <div id="sectionPoints" class="space-y-2"></div>
+                    <button onclick="addSection()" class="no-print mt-2 text-xs text-red-600 font-bold border border-red-200 px-3 py-1 rounded-full">+ 断面を追加 (最大10)</button>
+                    <div class="flex items-center gap-2 mt-4">終点：<span class="font-mono">+</span><input type="number" id="endPoint" step="0.1" class="save border-b w-24 p-1 font-mono" placeholder="0.0"></div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-3 border-t pt-2">
+                    <div>対策工法：<input type="text" id="methodInput" class="save w-full border-b p-1" placeholder="対策工法を入力"></div>
+                    <div class="flex items-center gap-2">既設構造物：
+                        <select id="existFlag" class="save border-b p-1"><option>無</option><option>有</option></select> 
+                        <input type="text" id="existDetail" placeholder="有の場合の内容" class="save border-b p-1 flex-1">
+                    </div>
+                    <div>その他：<textarea id="other1" class="save w-full border p-2 h-20 bg-slate-50 rounded"></textarea></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="tab2" class="tab-content space-y-4">
+            <div class="card bg-white p-3 rounded-xl shadow border">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-sm font-bold text-stone-600">仮設計画写真（手書きメモ）</h3>
+                    <div class="flex gap-1 no-print">
+                        <button onclick="undo('canvas2')" class="bg-gray-100 border px-3 py-1 rounded text-xs">↩︎</button>
+                        <button onclick="redo('canvas2')" class="bg-gray-100 border px-3 py-1 rounded text-xs">↪︎</button>
+                        <button onclick="clearCanvas('canvas2')" class="bg-gray-100 border px-2 py-1 rounded text-xs text-red-500">消去</button>
+                    </div>
+                </div>
+                <input type="file" id="file2" accept="image/*" capture="camera" onchange="initCanvas(this, 'canvas2')" class="text-xs mb-2 no-print w-full">
+                <div class="canvas-container" id="container2">
+                    <canvas id="canvas2"></canvas>
+                </div>
+            </div>
+
+            <div class="card bg-white p-4 rounded-xl shadow space-y-4 text-sm auto-save-form">
+                <div>
+                    <p class="text-[10px] font-bold text-gray-400 italic uppercase">Sync Project Name</p>
+                    <div id="syncNameDisplay" class="text-lg font-bold border-b-2 border-slate-200 pb-1 mb-2 text-slate-800">---</div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4 pt-2">
+                    <div>工事用道路：<select id="tempRoadFlag" class="save w-full border-b p-1"><option>無</option><option>有</option></select></div>
+                    <div>幅員(m)：<input type="number" id="roadWidth" step="0.1" class="save w-full border-b p-1" placeholder="0.0"></div>
+                    <div class="col-span-2">道路種別：
+                        <select id="roadType" onchange="toggleOther(this, 'roadTypeOther')" class="save border-b p-1"><option>敷砂利</option><option>敷鉄板</option><option>その他</option></select> 
+                        <input type="text" id="roadTypeOther" placeholder="内容を入力" class="save hidden border-b p-1 w-1/2">
+                    </div>
+                    <div>仮締切：<select id="tempDam" class="save w-full border-b p-1"><option>無</option><option>有</option></select></div>
+                    <div>仮排水管：<select id="tempPipe" class="save w-full border-b p-1"><option>無</option><option>有</option></select></div>
+                    <div class="col-span-2">汚濁防止施設：<select id="turbidityPrevent" class="save w-full border-b p-1"><option>無</option><option>有</option></select></div>
+                    <div class="col-span-2">その他（仮設）：<textarea id="other2" class="save w-full border p-2 h-20 bg-slate-50 rounded"></textarea></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        let canvases = {
+            canvas1: { ctx: null, history: [], redoStack: [], img: null, arrow: null },
+            canvas2: { ctx: null, history: [], redoStack: [], img: null, arrow: null }
+        };
+
+        function switchTab(idx) {
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('nav button').forEach(b => b.classList.remove('active-tab', 'text-slate-400'));
+            document.getElementById('tab'+idx).classList.add('active');
+            document.getElementById('tabBtn'+idx).classList.add('active-tab');
+        }
+
+        const siteNameInput = document.getElementById('siteName');
+        const syncNameDisplay = document.getElementById('syncNameDisplay');
+        siteNameInput.addEventListener('input', (e) => {
+            const val = e.target.value;
+            syncNameDisplay.innerText = val ? val + " + 仮設" : "---";
+            localStorage.setItem('siteName', val);
+        });
+
+        function toggleOther(select, targetId) {
+            const target = document.getElementById(targetId);
+            if (target) target.classList.toggle('hidden', select.value !== 'その他');
+        }
+
+        function exportPDF() {
+            const name = siteNameInput.value || "砂防災害調査";
+            const currentTab = document.getElementById('tab1').classList.contains('active') ? "" : "_仮設";
+            document.title = name + currentTab;
+            window.print();
+        }
+
+        function initCanvas(input, id) {
+            const canvas = document.getElementById(id);
+            const ctx = canvas.getContext('2d');
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    canvases[id].img = img;
+                    canvases[id].ctx = ctx;
+                    redraw(id);
+                    setupDrawing(id);
+                }
+                img.src = e.target.result;
+            }
+            reader.readAsDataURL(input.files[0]);
+        }
+
+        function redraw(id) {
+            const c = canvases[id];
+            if (!c.ctx) return;
+            c.ctx.clearRect(0, 0, c.ctx.canvas.width, c.ctx.canvas.height);
+            if (c.img) c.ctx.drawImage(c.img, 0, 0);
+
+            c.history.forEach(path => {
+                c.ctx.beginPath();
+                c.ctx.strokeStyle = "red"; c.ctx.lineWidth = 8; c.ctx.lineCap = "round";
+                path.forEach((p, i) => { i === 0 ? c.ctx.moveTo(p.x, p.y) : c.ctx.lineTo(p.x, p.y); });
+                c.ctx.stroke();
+            });
+
+            const length = document.getElementById('lengthInput').value;
+            if (id === 'canvas1' && c.arrow && length > 0) {
+                const a = c.arrow;
+                const ctx = c.ctx;
+                const angle = Math.atan2(a.y2 - a.y1, a.x2 - a.x1);
+                const perp = angle + Math.PI/2;
+                ctx.strokeStyle = "yellow"; ctx.lineWidth = 6;
+                const lineLength = 100;
+                [ {x: a.x1, y: a.y1}, {x: a.x2, y: a.y2} ].forEach(p => {
+                    ctx.beginPath();
+                    ctx.moveTo(p.x + lineLength * Math.cos(perp), p.y + lineLength * Math.sin(perp));
+                    ctx.lineTo(p.x - lineLength * Math.cos(perp), p.y - lineLength * Math.sin(perp));
+                    ctx.stroke();
+                });
+                ctx.beginPath(); ctx.moveTo(a.x1, a.y1); ctx.lineTo(a.x2, a.y2); ctx.stroke();
+                [ {x: a.x1, y: a.y1, ang: angle+Math.PI}, {x: a.x2, y: a.y2, ang: angle} ].forEach(p => {
+                    ctx.fillStyle = "yellow";
+                    ctx.beginPath(); ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(p.x - 50 * Math.cos(p.ang - 0.45), p.y - 50 * Math.sin(p.ang - 0.45));
+                    ctx.lineTo(p.x - 50 * Math.cos(p.ang + 0.45), p.y - 50 * Math.sin(p.ang + 0.45));
+                    ctx.fill();
+                });
+                const txt = `L=${length}m`;
+                ctx.font = "bold 90px sans-serif"; ctx.textAlign = "center";
+                const mx = (a.x1 + a.x2)/2; const my = (a.y1 + a.y2)/2 - 60;
+                ctx.strokeStyle = "white"; ctx.lineWidth = 14; ctx.strokeText(txt, mx, my);
+                ctx.fillStyle = "red"; ctx.fillText(txt, mx, my);
+                ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(a.x1, a.y1, 28, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(a.x2, a.y2, 28, 0, Math.PI*2); ctx.fill();
+            }
+        }
+
+        function setupDrawing(id) {
+            const canvas = document.getElementById(id);
+            let drawing = false; let dragTarget = null;
+            function getPos(e) {
+                const rect = canvas.getBoundingClientRect();
+                const scale = canvas.width / rect.width;
+                const cx = e.touches ? e.touches[0].clientX : e.clientX;
+                const cy = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: (cx - rect.left) * scale, y: (cy - rect.top) * scale };
+            }
+            canvas.onmousedown = canvas.ontouchstart = (e) => {
+                const p = getPos(e);
+                const a = canvases[id].arrow;
+                if (a && Math.hypot(p.x - a.x1, p.y - a.y1) < 100) dragTarget = 'x1';
+                else if (a && Math.hypot(p.x - a.x2, p.y - a.y2) < 100) dragTarget = 'x2';
+                else {
+                    drawing = true; 
+                    canvases[id].redoStack = [];
+                    canvases[id].history.push([p]);
+                }
+                if (e.cancelable) e.preventDefault();
+            };
+            canvas.onmousemove = canvas.ontouchmove = (e) => {
+                const p = getPos(e);
+                if (dragTarget) {
+                    canvases[id].arrow[dragTarget === 'x1' ? 'x1' : 'x2'] = p.x;
+                    canvases[id].arrow[dragTarget === 'x1' ? 'y1' : 'y2'] = p.y;
+                    redraw(id);
+                } else if (drawing) {
+                    canvases[id].history[canvases[id].history.length - 1].push(p);
+                    redraw(id);
+                }
+            };
+            window.onmouseup = window.ontouchend = () => { drawing = false; dragTarget = null; };
+        }
+
+        function undo(id) { 
+            if(canvases[id].history.length) {
+                canvases[id].redoStack.push(canvases[id].history.pop());
+                redraw(id);
+            } 
+        }
+        function redo(id) {
+            if(canvases[id].redoStack.length) {
+                canvases[id].history.push(canvases[id].redoStack.pop());
+                redraw(id);
+            }
+        }
+        function clearCanvas(id) { if(confirm("消去しますか？")) { canvases[id].history = []; canvases[id].redoStack = []; redraw(id); } }
+
+        function toggleArrow() {
+            const c = canvases.canvas1;
+            if (!c.ctx) { alert("先に写真を選択してね！"); return; }
+            if (!c.arrow) c.arrow = { x1: c.ctx.canvas.width * 0.2, y1: c.ctx.canvas.height * 0.5, x2: c.ctx.canvas.width * 0.8, y2: c.ctx.canvas.height * 0.5 };
+            else c.arrow = null;
+            redraw('canvas1');
+        }
+
+        function addSection() {
+            const list = document.getElementById('sectionPoints');
+            const num = list.children.length + 1;
+            if(num > 10) return;
+            const div = document.createElement('div');
+            div.className = "flex items-center gap-2 border-l-4 border-red-200 pl-2 py-1";
+            div.innerHTML = `<span class="text-[10px] font-bold text-gray-400 w-12">断面${num}</span> <span class="font-mono text-gray-400">+</span><input type="number" step="0.1" id="sec${num}" class="save border-b w-24 p-1 font-mono" placeholder="0.0">`;
+            list.appendChild(div);
+            initAutoSave();
+        }
+
+        function initAutoSave() {
+            document.querySelectorAll('.save').forEach(f => {
+                f.value = localStorage.getItem(f.id) || f.value;
+                f.oninput = () => {
+                    localStorage.setItem(f.id, f.value);
+                    if (f.id === 'siteName') siteNameInput.dispatchEvent(new Event('input'));
+                };
+                if (f.tagName === 'SELECT') toggleOther(f, f.id === 'facilityType' ? 'facilityOther' : (f.id === 'roadType' ? 'roadTypeOther' : null));
+            });
+            const savedName = localStorage.getItem('siteName');
+            if (savedName) {
+                siteNameInput.value = savedName;
+                syncNameDisplay.innerText = savedName + " + 仮設";
+            }
+        }
+
+        function clearAllData() { if(confirm("リセットしますか？")) { localStorage.clear(); location.reload(); } }
+
+        window.onload = initAutoSave;
+    </script>
+</body>
+</html>

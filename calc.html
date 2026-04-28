@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>現場計算機 - Haru Edition</title>
+    <style>
+        :root { --haru-red: #b30000; --haru-gray: #666; }
+        body { font-family: sans-serif; margin: 0; padding: 20px; background: #f4f4f4; line-height: 1.5; }
+        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
+        
+        /* 戻るリンクのスタイル */
+        .back-link { display: inline-block; margin-bottom: 15px; text-decoration: none; color: var(--haru-gray); font-size: 0.9em; transition: color 0.3s; }
+        .back-link:hover { color: var(--haru-red); }
+
+        h2 { color: var(--haru-red); border-bottom: 2px solid var(--haru-red); padding-bottom: 5px; margin-top: 0; }
+        .mode-section { margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px; }
+        label { font-weight: bold; font-size: 0.9em; color: #333; }
+        select, input { width: 100%; padding: 12px; margin: 8px 0 16px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 16px; }
+        
+        .result-area { background: #fff5f5; border: 1px solid var(--haru-red); padding: 15px; border-radius: 5px; margin-top: 10px; }
+        .result-item { display: flex; justify-content: space-between; margin: 8px 0; font-weight: bold; border-bottom: 1px dashed #ffdada; padding-bottom: 4px; }
+        .result-item:last-child { border-bottom: none; }
+        .unit { font-size: 0.8em; color: #666; margin-left: 4px; }
+        
+        .footer-note { font-size: 0.75em; color: #999; text-align: center; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <a href="index.html" class="back-link">← メインメニューに戻る</a>
+
+    <h2>現場計算機</h2>
+
+    <div class="mode-section">
+        <label>🏠 計算モード</label>
+        <select id="calcMode" onchange="updateUI()">
+            <option value="slope_n">📐 法勾配 (1:n)</option>
+            <option value="slope_pct">📈 %勾配</option>
+        </select>
+
+        <label>📋 入力の組み合わせ</label>
+        <select id="inputCombo" onchange="updateUI()"></select>
+    </div>
+
+    <div id="inputFields"></div>
+
+    <div class="result-area">
+        <div id="results">数値を入力してください</div>
+    </div>
+
+    <div class="footer-note">
+        Professional support by Haru for yuki
+    </div>
+</div>
+
+<script>
+const combos = {
+    slope_n: [
+        { id: "n_s", name: "勾配(n) + 斜距離(S)", fields: ["n", "S"] },
+        { id: "n_l", name: "勾配(n) + 水平距離(L)", fields: ["n", "L"] },
+        { id: "n_h", name: "勾配(n) + 直高(H)", fields: ["n", "H"] },
+        { id: "l_h", name: "水平距離(L) + 直高(H)", fields: ["L", "H"] }
+    ],
+    slope_pct: [
+        { id: "p_s", name: "勾配(%) + 斜距離(S)", fields: ["P", "S"] },
+        { id: "p_l", name: "勾配(%) + 水平距離(L)", fields: ["P", "L"] },
+        { id: "p_h", name: "勾配(%) + 標高差(H)", fields: ["P", "H"] },
+        { id: "l_h_p", name: "水平距離(L) + 標高差(H)", fields: ["L", "H"] }
+    ]
+};
+
+function updateUI() {
+    const mode = document.getElementById('calcMode').value;
+    const comboSelect = document.getElementById('inputCombo');
+    const inputFields = document.getElementById('inputFields');
+    
+    const prevValue = comboSelect.value;
+    comboSelect.innerHTML = combos[mode].map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    
+    // モード切り替え時に適切なデフォルトを選択
+    if (combos[mode].some(c => c.id === prevValue)) {
+        comboSelect.value = prevValue;
+    }
+
+    const selectedCombo = combos[mode].find(c => c.id === comboSelect.value) || combos[mode][0];
+    
+    inputFields.innerHTML = selectedCombo.fields.map(f => {
+        let label = f === 'n' ? '勾配 n (1:n)' : f === 'P' ? '勾配 (%)' : f === 'S' ? '斜距離 (m)' : f === 'L' ? '水平距離 (m)' : '直高/標高差 (m)';
+        let placeholder = f === 'n' ? '例: 1.5' : f === 'P' ? '例: 5.0' : '0.000';
+        return `<label>${label}</label><input type="number" id="val_${f}" step="0.001" placeholder="${placeholder}" oninput="calculate()">`;
+    }).join('');
+    
+    calculate();
+}
+
+function calculate() {
+    const mode = document.getElementById('calcMode').value;
+    const combo = document.getElementById('inputCombo').value;
+    const getV = (id) => parseFloat(document.getElementById('val_'+id)?.value) || 0;
+    
+    let n, P, S, L, H, deg;
+    let res = "";
+
+    try {
+        if (mode === 'slope_n') {
+            if (combo === 'n_s') { n = getV('n'); S = getV('S'); deg = Math.atan(1/n); L = S * Math.cos(deg); H = S * Math.sin(deg); }
+            else if (combo === 'n_l') { n = getV('n'); L = getV('L'); H = L / n; S = Math.sqrt(L**2 + H**2); deg = Math.atan(1/n); }
+            else if (combo === 'n_h') { n = getV('n'); H = getV('H'); L = H * n; S = Math.sqrt(L**2 + H**2); deg = Math.atan(1/n); }
+            else if (combo === 'l_h') { L = getV('L'); H = getV('H'); n = L / H; S = Math.sqrt(L**2 + H**2); deg = Math.atan(1/n); }
+            P = (1/n) * 100;
+        } else {
+            if (combo === 'p_s') { P = getV('P'); S = getV('S'); deg = Math.atan(P/100); L = S * Math.cos(deg); H = S * Math.sin(deg); }
+            else if (combo === 'p_l') { P = getV('P'); L = getV('L'); H = L * (P/100); S = Math.sqrt(L**2 + H**2); deg = Math.atan(P/100); }
+            else if (combo === 'p_h') { P = getV('P'); H = getV('H'); L = H / (P/100); S = Math.sqrt(L**2 + H**2); deg = Math.atan(P/100); }
+            else if (combo === 'l_h_p') { L = getV('L'); H = getV('H'); P = (H / L) * 100; S = Math.sqrt(L**2 + H**2); deg = Math.atan(P/100); }
+            n = 100 / P;
+        }
+
+        if (isNaN(S) || S === 0) {
+            res = "数値を入力してください";
+        } else {
+            res = `
+                <div class="result-item"><span>水平距離 (L)</span><span>${L.toFixed(3)}<span class="unit">m</span></span></div>
+                <div class="result-item"><span>垂直距離 (H)</span><span>${H.toFixed(3)}<span class="unit">m</span></span></div>
+                <div class="result-item"><span>斜距離 (S)</span><span>${S.toFixed(3)}<span class="unit">m</span></span></div>
+                <div class="result-item"><span>角度 (θ)</span><span>${(deg * 180 / Math.PI).toFixed(2)}<span class="unit">°</span></span></div>
+                <div class="result-item"><span>勾配</span><span>1:${n.toFixed(2)} (${P.toFixed(1)}%)</span></div>
+            `;
+        }
+    } catch (e) { res = "入力待ち..."; }
+    
+    document.getElementById('results').innerHTML = res;
+}
+
+updateUI();
+</script>
+</body>
+</html>
