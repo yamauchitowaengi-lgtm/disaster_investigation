@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1d4ed8" id="themeMeta">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="災害調査">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<title>災害調査支援</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="appbar">
+  <a class="ib" href="index.html" id="btnBack" aria-label="メニューへ戻る">‹</a>
+  <div class="appbar-title" id="appTitle"></div>
+  <span class="save-state" id="saveState"></span>
+  <button class="ib" id="btnNew" aria-label="新規作成" title="新規作成">＋</button>
+  <button class="ib" id="btnList" aria-label="保存済み一覧" title="保存済み一覧">☰</button>
+  <button class="pill" id="btnPdf">PDF</button>
+</header>
+
+<nav class="tabs">
+  <button data-tab="1" class="on">📍 被災箇所</button>
+  <button data-tab="2">🏗️ 仮設計画</button>
+</nav>
+
+<main class="wrap">
+  <section class="pane on" id="tab1"></section>
+  <section class="pane" id="tab2"></section>
+</main>
+
+<!-- 保存済み一覧 -->
+<div class="sheet-back" id="listSheet" hidden>
+  <div class="sheet">
+    <div class="sheet-h"><b>保存済みの調査票</b><button class="ib dark" data-close>✕</button></div>
+    <div class="sheet-b">
+      <div class="btnrow">
+        <button class="btn pri" id="listNew">＋ 新規作成</button>
+        <button class="btn" id="listPdf">✔ 選択をPDFにまとめる</button>
+      </div>
+      <div id="listBody"></div>
+      <p class="hint">入力内容・写真・書き込みは自動でこの端末に保存されます。</p>
+    </div>
+  </div>
+</div>
+
+<!-- PDF出力 -->
+<div class="sheet-back" id="exSheet" hidden>
+  <div class="sheet">
+    <div class="sheet-h"><b>PDF出力</b><button class="ib dark" data-close>✕</button></div>
+    <div class="sheet-b">
+      <div class="field"><label>ファイル名</label><input class="inp" id="exName"></div>
+      <div class="field"><label>画質（サイズ）</label>
+        <div class="seg" id="exQ">
+          <button data-q="low">軽量<small>メール向け</small></button>
+          <button data-q="mid" class="on">標準<small>おすすめ</small></button>
+          <button data-q="high">高画質<small>印刷向け</small></button>
+        </div>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="ex1" checked> 被災箇所</label>
+        <label><input type="checkbox" id="ex2"> 仮設計画</label>
+      </div>
+      <div class="ex-status" id="exStatus">作成中…</div>
+      <div class="thumbs" id="exThumbs"></div>
+      <div class="btnrow">
+        <button class="btn pri" id="exShare" disabled>📤 共有・保存（メール等）</button>
+        <button class="btn" id="exDl" disabled>⬇ ダウンロード</button>
+      </div>
+      <p class="hint">「共有・保存」から メール／ファイルに保存／AirDrop などを選べます。ページをタップすると拡大表示します。</p>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+(() => {
+'use strict';
+
+/* ================= 初期設定 ================= */
+const qs = new URLSearchParams(location.search);
+const typeKey = TYPES[qs.get('type')] ? qs.get('type') : 'other';
+const T = TYPES[typeKey];
+document.title = `災害調査支援: ${T.name}`;
+{
+  const s = document.documentElement.style;
+  s.setProperty('--c', T.color); s.setProperty('--c-dark', darken(T.color, .25));
+  s.setProperty('--c-soft', hexA(T.color, .08)); s.setProperty('--c-ring', hexA(T.color, .28));
+  $('#themeMeta').content = T.color;
+  $('#appTitle').textContent = `${T.icon} ${T.name}`;
+}
+
+const MAXSIDE = 1600;            // 取り込み写真の長辺(px)。A4に載せるには十分で、保存・描画も軽い
+const PRESETS = { low: { dpi: 150, q: .78 }, mid: { dpi: 200, q: .85 }, high: { dpi: 250, q: .9 } };
+const COLORS = ['#ef4444', '#facc15', '#2563eb', '#ffffff', '#111827'];
+const WIDTHS = [2.5, 4.5, 7.5];  // 線幅（画像幅1000pxあたりのpx）
+const FF = '-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo","Noto Sans CJK JP","Noto Sans JP",sans-serif';
+
+let rec = null, dirty = false, saveTimer = 0, dbOK = true;
+let pen = { c: lsGet('pen.c', COLORS[0]), w: +lsGet('pen.w', 1) };
+if (!COLORS.includes(pen.c)) pen.c = COLORS[0];
+const pads = {};
+const round1 = (v) => Math.round(v * 10) / 10;
+
+/* ================= 記録データ ================= */
+function defaults() {
+  const f = {
+    surveyDate: todayStr(), surveyor: lsGet('surveyor'), siteName: '', lengthInput: '', sec: [], endPoint: '',
+    existFlag: '無', existDetail: '', other1: '', methodInput: '', methodOther: '',
+    tempRoadFlag: '無', roadWidth: '', roadType: '敷砂利', roadTypeOther: '', tempDam: '無', tempPipe: '無',
+    turbidityPrevent: '無', other2: ''
+  };
+  if (T.facility.opts) { f.facilityType = T.facility.opts[0]; f.facilityOther = ''; } else f.facilityInput = '';
+  if (T.pos) f[T.pos.k] = T.pos.opts[0];
+  if (T.method.opts) f.methodType = T.method.opts[0];
+  return f;
+}
+const blankP = () => ({ img: null, w: 0, h: 0, strokes: [], arrow: null });
+function normalize(r) {
+  r.f = Object.assign(defaults(), r.f || {});
+  r.p = r.p || {}; r.p[1] = Object.assign(blankP(), r.p[1]); r.p[2] = Object.assign(blankP(), r.p[2]);
+  return r;
+}
+function newRecord() {
+  return normalize({ id: uid(), type: typeKey, created: Date.now(), updated: Date.now() });
+}
+function isBlank(r) {
+  const d = defaults();
+  return !r.p[1].img && !r.p[2].img && !r.f.siteName && !r.f.lengthInput && !r.f.other1 && !r.f.other2 &&
+    !r.f.sec.length && !r.f.endPoint && JSON.stringify({ ...r.f, surveyDate: 0, surveyor: 0 }) === JSON.stringify({ ...d, surveyDate: 0, surveyor: 0 });
+}
+function facilityText(r) {
+  const f = r.f;
+  if (T.facility.opts) return f.facilityType === 'その他' && f.facilityOther ? `その他（${f.facilityOther}）` : f.facilityType;
+  return f.facilityInput || '';
+}
+function methodText(r) {
+  const f = r.f;
+  if (T.method.opts) return f.methodType === 'その他' && f.methodOther ? `その他（${f.methodOther}）` : f.methodType;
+  return f.methodInput || '';
+}
+function metaOf(r) {
+  return { id: r.id, type: r.type, updated: r.updated, siteName: r.f.siteName, date: r.f.surveyDate, facility: facilityText(r), photos: (r.p[1].img ? 1 : 0) + (r.p[2].img ? 1 : 0) };
+}
+
+/* ================= 自動保存 ================= */
+function setState(t) { $('#saveState').textContent = t; }
+function touched() {
+  dirty = true; setState('保存中…');
+  clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 700);
+}
+async function saveNow() {
+  clearTimeout(saveTimer);
+  if (!dirty || !rec) return;
+  dirty = false; rec.updated = Date.now();
+  try { await DB.put(rec, metaOf(rec)); dbOK = true; setState('✓ 保存済み'); }
+  catch (e) { dbOK = false; setState('⚠ 保存不可'); }
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+addEventListener('pagehide', saveNow);
+$('#btnBack').addEventListener('click', async (e) => { e.preventDefault(); await saveNow(); location.href = 'index.html'; });
+
+/* ================= フォーム部品 ================= */
+function bindText(el, key, after) {
+  el.value = rec.f[key] ?? '';
+  el.addEventListener('input', () => { rec.f[key] = el.value; if (after) after(); touched(); });
+  return el;
+}
+const mkField = (label, ctl, cls = '') => h('div', { class: 'field ' + cls }, h('label', {}, label), ctl);
+function mkText(key, o = {}) {
+  const el = h('input', { class: 'inp ' + (o.cls || ''), type: o.type || 'text', placeholder: o.ph || '' });
+  if (o.type === 'number') { el.step = '0.1'; el.setAttribute('inputmode', 'decimal'); }
+  return bindText(el, key, o.after);
+}
+function mkSelect(key, opts, after) {
+  const el = h('select', { class: 'inp' }, opts.map(o => h('option', { value: o }, o)));
+  if (!opts.includes(rec.f[key])) rec.f[key] = opts[0];
+  el.value = rec.f[key];
+  el.addEventListener('change', () => { rec.f[key] = el.value; if (after) after(); touched(); });
+  return el;
+}
+function selWithOther(label, key, otherKey, opts, otherPh, cls) {
+  const oth = mkText(otherKey, { ph: otherPh }); oth.style.marginTop = '6px';
+  const upd = () => { oth.hidden = rec.f[key] !== 'その他'; };
+  const sel = mkSelect(key, opts, upd); upd();
+  return mkField(label, [sel, oth], cls);
+}
+
+function stations() {
+  const list = h('div');
+  const add = h('button', { class: 'btn sm', type: 'button' }, '＋ 被災断面を追加（最大10）');
+  const render = () => {
+    list.innerHTML = '';
+    rec.f.sec.forEach((v, i) => {
+      const inp = h('input', { class: 'inp mono', type: 'number', step: '0.1', placeholder: '0.0' });
+      inp.setAttribute('inputmode', 'decimal'); inp.value = v;
+      inp.addEventListener('input', () => { rec.f.sec[i] = inp.value; touched(); });
+      list.append(h('div', { class: 'sec-row' },
+        h('span', { class: 'sec-name' }, `断面${i + 1}`), h('span', { class: 'plus' }, '+'), inp,
+        h('button', { class: 'x', type: 'button', 'aria-label': '削除', onclick: () => { rec.f.sec.splice(i, 1); render(); touched(); } }, '×')));
+    });
+    add.disabled = rec.f.sec.length >= 10;
+  };
+  add.addEventListener('click', () => { if (rec.f.sec.length < 10) { rec.f.sec.push(''); render(); touched(); const ins = $$('input', list); ins[ins.length - 1].focus(); } });
+  render();
+  const end = mkText('endPoint', { type: 'number', ph: '0.0', cls: 'mono' }); end.style.width = '120px';
+  return h('div', {},
+    h('div', { class: 'sub-h' }, 'STATION（測点）'),
+    h('div', { class: 'sec-row', style: 'border-left-color:transparent' }, h('span', { class: 'sec-name' }, '起点'), h('span', { class: 'stat' }, 'NO.0')),
+    list, add,
+    h('div', { class: 'sec-row', style: 'margin-top:12px;border-left-color:transparent' }, h('span', { class: 'sec-name' }, '終点'), h('span', { class: 'plus' }, '+'), end));
+}
+
+/* ================= 写真パッド（描画・寸法線） ================= */
+function paintPhoto(ctx, img, d, len, W, H) {
+  const u = W / 1000;
+  ctx.save(); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  if (img) ctx.drawImage(img, 0, 0, W, H);
+  for (const s of d.strokes) drawStroke(ctx, s, u);
+  if (d.arrow && parseFloat(len) > 0) drawDim(ctx, d.arrow, len, u);
+  ctx.restore();
+}
+function drawStroke(ctx, s, u) {
+  ctx.strokeStyle = s.c; ctx.fillStyle = s.c; ctx.lineWidth = s.w * u; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const p = s.p;
+  if (p.length === 1) { ctx.beginPath(); ctx.arc(p[0][0], p[0][1], s.w * u / 2, 0, 7); ctx.fill(); return; }
+  ctx.beginPath(); ctx.moveTo(p[0][0], p[0][1]);
+  for (let i = 1; i < p.length; i++) ctx.lineTo(p[i][0], p[i][1]);
+  ctx.stroke();
+}
+function drawDim(ctx, a, len, u) {
+  const ang = Math.atan2(a.y2 - a.y1, a.x2 - a.x1), perp = ang + Math.PI / 2;
+  const tick = 45 * u, head = 24 * u, lw = 3.5 * u;
+  const line = (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+  const pass = (col, w) => {
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round';
+    for (const [x, y] of [[a.x1, a.y1], [a.x2, a.y2]]) line(x + tick * Math.cos(perp), y + tick * Math.sin(perp), x - tick * Math.cos(perp), y - tick * Math.sin(perp));
+    line(a.x1, a.y1, a.x2, a.y2);
+  };
+  pass('rgba(0,0,0,.55)', lw * 1.9); pass('#fde047', lw);
+  for (const [x, y, an] of [[a.x1, a.y1, ang + Math.PI], [a.x2, a.y2, ang]]) {
+    ctx.beginPath(); ctx.moveTo(x, y);
+    ctx.lineTo(x - head * Math.cos(an - .45), y - head * Math.sin(an - .45));
+    ctx.lineTo(x - head * Math.cos(an + .45), y - head * Math.sin(an + .45)); ctx.closePath();
+    ctx.fillStyle = '#fde047'; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = lw * .5; ctx.stroke(); ctx.fill();
+  }
+  const txt = `L=${len}m`, mx = (a.x1 + a.x2) / 2, my = (a.y1 + a.y2) / 2 - 26 * u;
+  ctx.font = `bold ${34 * u}px ${FF}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 7 * u; ctx.strokeText(txt, mx, my);
+  ctx.fillStyle = '#dc2626'; ctx.fillText(txt, mx, my);
+  for (const [x, y] of [[a.x1, a.y1], [a.x2, a.y2]]) {
+    ctx.beginPath(); ctx.arc(x, y, 11 * u, 0, 7); ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 2 * u; ctx.stroke();
+  }
+}
+const defaultArrow = (w, hh) => ({ x1: w * .2, y1: hh * .5, x2: w * .8, y2: hh * .5 });
+
+function schedulePaint(pad) {
+  if (pad.raf) return;
+  pad.raf = requestAnimationFrame(() => { pad.raf = 0; paintPad(pad); });
+}
+function paintPad(pad) {
+  const d = rec.p[pad.idx];
+  paintPhoto(pad.ctx, pad.img, d, pad.idx === 1 ? rec.f.lengthInput : '', pad.cv.width, pad.cv.height);
+}
+async function setPadImage(pad) {
+  const d = rec.p[pad.idx];
+  if (!d.img) { pad.img = null; pad.cv.width = 1000; pad.cv.height = 600; pad.cv.style.background = '#1f2937'; pad.hint.hidden = false; pad.cv.getContext('2d').clearRect(0, 0, 1000, 600); refreshTools(pad); return; }
+  pad.img = await loadImg(d.img);
+  pad.cv.width = d.w; pad.cv.height = d.h; pad.cv.style.background = '#fff';
+  pad.hint.hidden = true; paintPad(pad); refreshTools(pad);
+}
+async function pickPhoto(idx, file) {
+  if (!file) return;
+  const pad = pads[idx], d = rec.p[idx];
+  try {
+    const url = URL.createObjectURL(file);
+    const img = await loadImg(url);
+    const nw = img.naturalWidth, nh = img.naturalHeight, s = Math.min(1, MAXSIDE / Math.max(nw, nh));
+    const w = Math.round(nw * s), hh = Math.round(nh * s);
+    const c = document.createElement('canvas'); c.width = w; c.height = hh;
+    const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, w, hh);
+    URL.revokeObjectURL(url);
+    const hadArrow = !!d.arrow;
+    d.img = c.toDataURL('image/jpeg', .88); d.w = w; d.h = hh; d.strokes = [];
+    d.arrow = hadArrow ? defaultArrow(w, hh) : null;
+    pad.redo = [];
+    await setPadImage(pad); syncArrowBtn(); touched();
+  } catch (e) { toast('写真を読み込めませんでした'); }
+}
+function refreshTools(pad) {
+  const d = rec.p[pad.idx], has = !!d.img;
+  pad.btnUndo.disabled = !has || !d.strokes.length;
+  pad.btnRedo.disabled = !has || !pad.redo.length;
+  pad.btnClear.disabled = !has || !d.strokes.length;
+}
+function syncPen() {
+  $$('.swatch').forEach(b => b.classList.toggle('on', b.dataset.c === pen.c));
+  $$('.wbtn').forEach(b => b.classList.toggle('on', +b.dataset.w === pen.w));
+}
+function syncArrowBtn() {
+  const p1 = pads[1]; if (!p1 || !p1.btnArrow) return;
+  p1.btnArrow.classList.toggle('on', !!rec.p[1].arrow);
+}
+function wirePad(pad) {
+  const cv = pad.cv;
+  const pos = (e) => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
+  cv.addEventListener('pointerdown', (e) => {
+    if (pad.mode !== 'draw' || !pad.img) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault(); cv.setPointerCapture(e.pointerId);
+    const d = rec.p[pad.idx], u = cv.width / 1000, [x, y] = pos(e), a = d.arrow;
+    if (pad.idx === 1 && a && parseFloat(rec.f.lengthInput) > 0) {
+      const R = 70 * u;
+      if (Math.hypot(x - a.x1, y - a.y1) < R) { pad.drag = 1; return; }
+      if (Math.hypot(x - a.x2, y - a.y2) < R) { pad.drag = 2; return; }
+    }
+    pad.cur = { c: pen.c, w: WIDTHS[pen.w], p: [[round1(x), round1(y)]] };
+    const g = pad.ctx; g.fillStyle = pad.cur.c; g.beginPath(); g.arc(x, y, pad.cur.w * u / 2, 0, 7); g.fill();
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (!pad.drag && !pad.cur) return;
+    e.preventDefault();
+    const [x, y] = pos(e), d = rec.p[pad.idx];
+    if (pad.drag) {
+      const a = d.arrow;
+      if (pad.drag === 1) { a.x1 = x; a.y1 = y; } else { a.x2 = x; a.y2 = y; }
+      schedulePaint(pad);
+    } else {
+      const s = pad.cur, last = s.p[s.p.length - 1], u = cv.width / 1000;
+      if (Math.hypot(x - last[0], y - last[1]) < 1.2 * u) return;
+      const g = pad.ctx; g.strokeStyle = s.c; g.lineWidth = s.w * u; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(last[0], last[1]); g.lineTo(x, y); g.stroke();
+      s.p.push([round1(x), round1(y)]);
+    }
+  });
+  const end = () => {
+    if (pad.drag) { pad.drag = 0; touched(); }
+    else if (pad.cur) { rec.p[pad.idx].strokes.push(pad.cur); pad.cur = null; pad.redo = []; refreshTools(pad); touched(); }
+  };
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+}
+
+function photoCard(idx, title) {
+  const cv = h('canvas', { class: 'pad-cv', width: 1000, height: 600 });
+  const hint = h('div', { class: 'pad-hint' }, '📷 「撮影」または「写真を選択」から写真を追加してください');
+  const pad = { idx, cv, ctx: cv.getContext('2d'), img: null, mode: 'draw', redo: [], cur: null, drag: 0, raf: 0, hint };
+  pads[idx] = pad;
+
+  const fCam = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: (e) => { pickPhoto(idx, e.target.files[0]); e.target.value = ''; } });
+  const fLib = h('input', { type: 'file', accept: 'image/*', hidden: true, onchange: (e) => { pickPhoto(idx, e.target.files[0]); e.target.value = ''; } });
+
+  pad.btnUndo = h('button', { class: 'tbtn', type: 'button', title: '一つ戻す', onclick: () => { const s = rec.p[idx].strokes; if (s.length) { pad.redo.push(s.pop()); paintPad(pad); refreshTools(pad); touched(); } } }, '↩︎');
+  pad.btnRedo = h('button', { class: 'tbtn', type: 'button', title: 'やり直す', onclick: () => { if (pad.redo.length) { rec.p[idx].strokes.push(pad.redo.pop()); paintPad(pad); refreshTools(pad); touched(); } } }, '↪︎');
+  pad.btnClear = h('button', { class: 'tbtn', type: 'button', title: '書き込みを全消去', onclick: () => { if (confirm('書き込みをすべて消去しますか？')) { rec.p[idx].strokes = []; pad.redo = []; paintPad(pad); refreshTools(pad); touched(); } } }, '🗑');
+  const btnMode = h('button', { class: 'tbtn', type: 'button', title: '描画 / スクロール切替', onclick: () => {
+    pad.mode = pad.mode === 'draw' ? 'view' : 'draw';
+    cv.style.touchAction = pad.mode === 'draw' ? 'none' : 'pan-y pinch-zoom';
+    btnMode.textContent = pad.mode === 'draw' ? '✏️ 描く' : '👆 移動';
+    btnMode.classList.toggle('on', pad.mode === 'draw');
+  } }, '✏️ 描く');
+  btnMode.classList.add('on');
+
+  const tools = [
+    h('div', { class: 'tg' }, COLORS.map(c => h('button', { class: 'swatch', type: 'button', 'aria-label': '色', style: `--sw:${c}`, 'data-c': c, onclick: () => { pen.c = c; lsSet('pen.c', c); syncPen(); } }))),
+    h('div', { class: 'tg' }, WIDTHS.map((_, i) => h('button', { class: 'wbtn', type: 'button', 'aria-label': '線の太さ', 'data-w': i, onclick: () => { pen.w = i; lsSet('pen.w', i); syncPen(); } }, h('i', { style: `width:${6 + i * 5}px;height:${6 + i * 5}px` })))),
+    h('div', { class: 'tg' }, pad.btnUndo, pad.btnRedo, pad.btnClear, btnMode)
+  ];
+  if (idx === 1) {
+    pad.btnArrow = h('button', { class: 'tbtn', type: 'button', onclick: () => {
+      const d = rec.p[1];
+      if (!d.img) { toast('先に写真を追加してください'); return; }
+      d.arrow = d.arrow ? null : defaultArrow(d.w, d.h);
+      if (d.arrow && !(parseFloat(rec.f.lengthInput) > 0)) toast('被災延長(m)を入力すると、寸法線に表示されます');
+      paintPad(pad); syncArrowBtn(); touched();
+    } }, '📏 寸法線');
+    tools.push(h('div', { class: 'tg' }, pad.btnArrow));
+  }
+
+  wirePad(pad);
+  const card = h('div', { class: 'card' },
+    h('div', { class: 'card-h' }, h('h3', {}, title)),
+    h('div', { class: 'btnrow' },
+      h('button', { class: 'btn pri', type: 'button', onclick: () => fCam.click() }, '📷 撮影'),
+      h('button', { class: 'btn', type: 'button', onclick: () => fLib.click() }, '🖼️ 写真を選択'), fCam, fLib),
+    h('div', { class: 'toolbar' }, tools),
+    h('div', { class: 'canvas-box' }, cv, hint));
+  return card;
+}
+
+/* ================= 画面構築 ================= */
+function renderTab1() {
+  const f = rec.f;
+  const host = $('#tab1'); host.innerHTML = '';
+  const fields = [];
+  fields.push(mkField('現場名', mkText('siteName', { ph: '現場名を入力してください', cls: 'strong', after: () => { const e = $('#syncName'); if (e) e.textContent = f.siteName ? f.siteName + ' + 仮設' : '---'; } }), 'span2'));
+  fields.push(mkField('調査日', mkText('surveyDate', { type: 'date' })));
+  fields.push(mkField('調査者', mkText('surveyor', { ph: '氏名', after: () => lsSet('surveyor', f.surveyor) })));
+  if (T.facility.opts) fields.push(selWithOther('被災施設', 'facilityType', 'facilityOther', T.facility.opts, T.facility.otherPh, T.pos ? '' : 'span2'));
+  else fields.push(mkField('被災施設', mkText('facilityInput', { ph: T.facility.ph }), 'span2'));
+  if (T.pos) fields.push(mkField(T.pos.label, mkSelect(T.pos.k, T.pos.opts)));
+  fields.push(mkField('被災延長 (m)', mkText('lengthInput', { type: 'number', ph: '0.0', cls: 'strong mono', after: () => schedulePaint(pads[1]) }), 'span2'));
+
+  const grid = h('div', { class: 'grid2' }, fields);
+  const rest = h('div', { style: 'display:grid;gap:12px;margin-top:12px' },
+    stations(),
+    h('div', { class: 'sub-h' }, '対策・既設'),
+    T.method.opts ? selWithOther('対策工法', 'methodType', 'methodOther', T.method.opts, T.method.otherPh)
+                  : mkField('対策工法', mkText('methodInput', { ph: T.method.ph })),
+    mkField('既設構造物', h('div', { style: 'display:flex;gap:8px' }, (() => { const s = mkSelect('existFlag', ['無', '有']); s.style.width = '90px'; s.style.flex = 'none'; return s; })(), mkText('existDetail', { ph: '有の場合の内容' }))),
+    mkField('その他', bindText(h('textarea', { class: 'inp', rows: 3 }), 'other1')));
+
+  host.append(
+    h('div', { class: 'col-photo' }, photoCard(1, '被災全景写真（手書き・寸法線）')),
+    h('div', { class: 'col-form' }, h('div', { class: 'card' }, grid, rest)));
+}
+
+function renderTab2() {
+  const f = rec.f;
+  const host = $('#tab2'); host.innerHTML = '';
+  const roadType = selWithOther('道路種別', 'roadType', 'roadTypeOther', ['敷砂利', '敷鉄板', 'その他'], '内容を入力', 'span2');
+  const flds = [
+    mkField('工事用道路', mkSelect('tempRoadFlag', ['無', '有'])),
+    mkField('幅員 (m)', mkText('roadWidth', { type: 'number', ph: '0.0' })),
+    roadType,
+    mkField('仮締切', mkSelect('tempDam', ['無', '有'])),
+    mkField('仮排水管', mkSelect('tempPipe', ['無', '有']))
+  ];
+  if (T.turbidity) flds.push(mkField('汚濁防止施設', mkSelect('turbidityPrevent', ['無', '有']), 'span2'));
+  flds.push(mkField('その他（仮設）', bindText(h('textarea', { class: 'inp', rows: 3 }), 'other2'), 'span2'));
+  host.append(
+    h('div', { class: 'col-photo' }, photoCard(2, '仮設計画写真（手書きメモ）')),
+    h('div', { class: 'col-form' }, h('div', { class: 'card' },
+      h('div', { class: 'lbl' }, 'SYNC PROJECT NAME'),
+      h('div', { class: 'sync-name', id: 'syncName' }, f.siteName ? f.siteName + ' + 仮設' : '---'),
+      h('div', { class: 'grid2', style: 'margin-top:12px' }, flds))));
+}
+
+async function renderAll() {
+  renderTab1(); renderTab2(); syncPen();
+  for (const i of [1, 2]) await setPadImage(pads[i]);
+  syncArrowBtn();
+}
+
+$$('.tabs button').forEach(b => b.addEventListener('click', () => {
+  $$('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  $$('.pane').forEach(p => p.classList.toggle('on', p.id === 'tab' + b.dataset.tab));
+  scrollTo(0, 0);
+}));
+
+/* ================= 新規 / 一覧 ================= */
+async function startNew() {
+  await saveNow();
+  if (rec && isBlank(rec)) { toast('すでに新規の状態です'); return; }
+  rec = newRecord(); history.replaceState(null, '', `?type=${typeKey}`);
+  await renderAll(); setState(''); scrollTo(0, 0); toast('新しい調査票を作成しました');
+}
+$('#btnNew').addEventListener('click', startNew);
+
+const listSheet = $('#listSheet'), exSheet = $('#exSheet');
+$$('[data-close]').forEach(b => b.addEventListener('click', () => closeSheet(b.closest('.sheet-back'))));
+[listSheet, exSheet].forEach(s => s.addEventListener('click', (e) => { if (e.target === s) closeSheet(s); }));
+function closeSheet(s) { s.hidden = true; if (s === exSheet) cleanupExport(); }
+
+async function openList() {
+  await saveNow();
+  listSheet.hidden = false;
+  const body = $('#listBody'); body.innerHTML = '';
+  let metas = [];
+  try { metas = await DB.list(typeKey); } catch (e) { body.textContent = '保存データを読み込めません。'; return; }
+  metas.sort((a, b) => b.updated - a.updated);
+  if (!metas.length) { body.append(h('p', { class: 'hint', style: 'padding:14px 0' }, 'まだ保存された調査票はありません。')); return; }
+  metas.forEach(m => {
+    const d = new Date(m.updated);
+    const cb = h('input', { type: 'checkbox', 'data-id': m.id });
+    body.append(h('div', { class: 'rec-row' }, cb,
+      h('div', { class: 'rec-main' },
+        h('div', { class: 'rec-t' }, m.siteName || '（現場名なし）', m.id === rec.id ? h('span', { class: 'tag' }, '編集中') : null),
+        h('div', { class: 'rec-s' }, `${fmtDate(m.date)} ・ ${m.facility || '－'} ・ 写真${m.photos}枚 ・ 更新 ${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`)),
+      h('button', { class: 'btn sm', onclick: () => { listSheet.hidden = true; openRecord(m.id); } }, '開く'),
+      h('button', { class: 'btn sm danger', onclick: async () => {
+        if (!confirm(`「${m.siteName || '現場名なし'}」を削除しますか？`)) return;
+        await DB.del(m.id);
+        if (m.id === rec.id) { rec = newRecord(); history.replaceState(null, '', `?type=${typeKey}`); await renderAll(); setState(''); }
+        openList();
+      } }, '削除')));
+  });
+}
+async function openRecord(id) {
+  if (id === rec.id) return;
+  await saveNow();
+  const r = await DB.get(id);
+  if (!r) { toast('読み込めませんでした'); return; }
+  rec = normalize(r); history.replaceState(null, '', `?type=${typeKey}&id=${id}`);
+  await renderAll(); setState('✓ 保存済み'); scrollTo(0, 0);
+}
+$('#btnList').addEventListener('click', openList);
+$('#listNew').addEventListener('click', async () => { listSheet.hidden = true; await startNew(); });
+$('#listPdf').addEventListener('click', async () => {
+  let ids = $$('#listBody input:checked').map(i => i.dataset.id);
+  if (!ids.length) ids = $$('#listBody input').map(i => i.dataset.id);   // 未選択なら全件
+  if (!ids.length) { toast('調査票がありません'); return; }
+  const recs = [];
+  for (const id of ids) recs.push(id === rec.id ? rec : normalize(await DB.get(id)));
+  recs.sort((a, b) => a.created - b.created);
+  listSheet.hidden = true; openExport(recs);
+});
+
+/* ================= PDF出力 ================= */
+const FIELDS_P2 = (r) => r.p[2].img || r.f.roadWidth || r.f.other2 || r.f.tempRoadFlag === '有' || r.f.tempDam === '有' || r.f.tempPipe === '有' || r.f.turbidityPrevent === '有';
+
+function pdfRows(r, tab) {
+  const f = r.f, Tt = TYPES[r.type] || T, rows = [];
+  const dash = (v) => (v === undefined || v === null || String(v).trim() === '' ? '－' : String(v));
+  if (tab === 1) {
+    rows.push(['被災施設', dash(facilityText(r))]);
+    if (Tt.pos) rows.push([Tt.pos.label, dash(f[Tt.pos.k])]);
+    rows.push(['被災延長', f.lengthInput ? `${f.lengthInput} m` : '－']);
+    const st = ['起点 NO.0'];
+    f.sec.forEach((v, i) => { if (String(v).trim() !== '') st.push(`断面${i + 1} +${v}`); });
+    if (String(f.endPoint).trim() !== '') st.push(`終点 +${f.endPoint}`);
+    rows.push(['測点（起点〜終点）', st.join('　／　')]);
+    rows.push(['対策工法', dash(methodText(r))]);
+    rows.push(['既設構造物', f.existFlag === '有' ? `有${f.existDetail ? `（${f.existDetail}）` : ''}` : '無']);
+    rows.push(['その他', dash(f.other1)]);
+  } else {
+    rows.push(['工事用道路', dash(f.tempRoadFlag)]);
+    rows.push(['幅員', f.roadWidth ? `${f.roadWidth} m` : '－']);
+    rows.push(['道路種別', dash(f.roadType === 'その他' && f.roadTypeOther ? `その他（${f.roadTypeOther}）` : f.roadType)]);
+    rows.push(['仮締切', dash(f.tempDam)]);
+    rows.push(['仮排水管', dash(f.tempPipe)]);
+    if (Tt.turbidity) rows.push(['汚濁防止施設', dash(f.turbidityPrevent)]);
+    rows.push(['その他（仮設）', dash(f.other2)]);
+  }
+  return rows;
+}
+function wrapLines(g, text, maxW) {
+  const out = [];
+  String(text).split('\n').forEach(par => {
+    let line = '';
+    for (const ch of par) {
+      if (g.measureText(line + ch).width > maxW && line) { out.push(line); line = ch; } else line += ch;
+    }
+    out.push(line);
+  });
+  return out;
+}
+async function photoCanvas(r, tab) {
+  const d = r.p[tab];
+  if (!d.img) return null;
+  const img = await loadImg(d.img);
+  const c = document.createElement('canvas'); c.width = d.w; c.height = d.h;
+  paintPhoto(c.getContext('2d'), img, d, tab === 1 ? r.f.lengthInput : '', d.w, d.h);
+  return c;
+}
+async function renderPage(r, tab, o, no, total) {
+  const Tt = TYPES[r.type] || T, f = r.f;
+  const k = o.dpi / 25.4, W = Math.round(210 * k), H = Math.round(297 * k);
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const g = cv.getContext('2d'); g.imageSmoothingQuality = 'high';
+  const mm = (v) => v * k, fs = (pt) => pt * 25.4 / 72 * k, font = (pt, b) => `${b ? 'bold ' : ''}${fs(pt)}px ${FF}`;
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+
+  // ヘッダー帯
+  g.fillStyle = Tt.color; g.fillRect(0, 0, W, mm(13));
+  g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.textAlign = 'left'; g.font = font(13, true);
+  g.fillText(`災害調査票　${Tt.name}　／　${tab === 1 ? '被災箇所' : '仮設計画'}`, mm(12), mm(6.6));
+  g.textAlign = 'right'; g.font = font(10, false);
+  g.fillText(`調査日 ${fmtDate(f.surveyDate)}` + (f.surveyor ? `　調査者 ${f.surveyor}` : ''), W - mm(12), mm(6.6));
+
+  // 現場名
+  g.textAlign = 'left'; g.fillStyle = '#0f172a';
+  const site = (f.siteName || '（現場名 未入力）') + (tab === 2 ? '　＋　仮設' : '');
+  let pt = 18; g.font = font(pt, true);
+  while (g.measureText(site).width > mm(186) && pt > 10) { pt -= .5; g.font = font(pt, true); }
+  g.fillText(site, mm(12), mm(21.5));
+  g.fillStyle = Tt.color; g.fillRect(mm(12), mm(26), mm(186), mm(.7));
+
+  // 表のレイアウト計算
+  const bx = mm(12), bw = mm(186), labelW = mm(36), padX = mm(2.6), padY = mm(2.2), lh = fs(10.5) * 1.5;
+  g.font = font(10.5, false);
+  const lay = pdfRows(r, tab).map(([lab, val]) => {
+    const lines = wrapLines(g, val, bw - labelW - padX * 2).slice(0, 10);
+    return { lab, lines, h: Math.max(mm(9), lines.length * lh + padY * 2) };
+  });
+  const tableH = lay.reduce((s, x) => s + x.h, 0);
+
+  // 写真
+  const top = mm(31), capH = mm(7);
+  const maxPh = Math.max(mm(60), Math.min(mm(150), H - mm(14) - top - capH - mm(4) - tableH));
+  const pc = await photoCanvas(r, tab);
+  let y = top, ph;
+  if (pc) {
+    const s = Math.min(bw / pc.width, maxPh / pc.height), w = pc.width * s; ph = pc.height * s;
+    const px = bx + (bw - w) / 2;
+    g.drawImage(pc, px, y, w, ph);
+    g.strokeStyle = '#94a3b8'; g.lineWidth = Math.max(1, mm(.25)); g.strokeRect(px, y, w, ph);
+    pc.width = 0;
+  } else {
+    ph = mm(50);
+    g.fillStyle = '#f1f5f9'; g.fillRect(bx, y, bw, ph);
+    g.strokeStyle = '#cbd5e1'; g.lineWidth = Math.max(1, mm(.25)); g.strokeRect(bx, y, bw, ph);
+    g.fillStyle = '#94a3b8'; g.textAlign = 'center'; g.font = font(11, false); g.fillText('（写真なし）', bx + bw / 2, y + ph / 2); g.textAlign = 'left';
+  }
+  g.fillStyle = '#475569'; g.font = font(9, true); g.textAlign = 'left';
+  g.fillText(tab === 1 ? '被災全景写真（寸法線・描き込み）' : '仮設計画写真（手書きメモ）', bx, y + ph + mm(4.2));
+  y += ph + capH + mm(2);
+
+  // 表
+  g.lineWidth = Math.max(1, mm(.2));
+  lay.forEach(row => {
+    g.fillStyle = hexA(Tt.color, .09); g.fillRect(bx, y, labelW, row.h);
+    g.strokeStyle = '#cbd5e1'; g.strokeRect(bx, y, bw, row.h);
+    g.beginPath(); g.moveTo(bx + labelW, y); g.lineTo(bx + labelW, y + row.h); g.stroke();
+    g.fillStyle = '#334155'; g.font = font(9.5, true); g.fillText(row.lab, bx + padX, y + padY + lh / 2);
+    g.fillStyle = '#0f172a'; g.font = font(10.5, false);
+    row.lines.forEach((ln, i) => g.fillText(ln, bx + labelW + padX, y + padY + lh * (i + .5)));
+    y += row.h;
+  });
+
+  // フッター
+  g.strokeStyle = '#cbd5e1'; g.beginPath(); g.moveTo(mm(12), H - mm(11)); g.lineTo(W - mm(12), H - mm(11)); g.stroke();
+  g.fillStyle = '#64748b'; g.font = font(8, false); g.textAlign = 'left'; g.fillText('災害調査支援', mm(12), H - mm(7));
+  g.textAlign = 'right'; g.fillText(`${no} / ${total}`, W - mm(12), H - mm(7));
+
+  const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', o.q));
+  cv.width = 0;
+  return { blob, w: W, h: H };
+}
+async function buildPdf(recs, o, onProg) {
+  const jobs = [];
+  recs.forEach(r => { if (o.p1) jobs.push([r, 1]); if (o.p2 && (recs.length === 1 || FIELDS_P2(r))) jobs.push([r, 2]); });
+  if (!jobs.length) throw new Error('出力するページを選択してください');
+  const pages = [];
+  for (let i = 0; i < jobs.length; i++) {
+    onProg && onProg(i + 1, jobs.length);
+    await new Promise(r => setTimeout(r));
+    const { blob, w, h: hh } = await renderPage(jobs[i][0], jobs[i][1], o, i + 1, jobs.length);
+    pages.push({ jpeg: blob, w, h: hh, bytes: new Uint8Array(await blob.arrayBuffer()) });
+  }
+  const first = recs[0];
+  const title = recs.length > 1 ? `${T.name} 調査票` : (first.f.siteName || T.name);
+  return { blob: buildPdfBlob(pages, title), pages: pages.map(p => p.jpeg) };
+}
+
+const exp = { recs: [], pdf: null, token: 0, urls: [], q: lsGet('pdfq', 'mid'), timer: 0 };
+function cleanupExport() { exp.token++; exp.urls.forEach(u => URL.revokeObjectURL(u)); exp.urls = []; exp.pdf = null; }
+const fmtSize = (b) => b >= 1048576 ? (b / 1048576).toFixed(2) + ' MB' : Math.round(b / 1024) + ' KB';
+
+function openExport(recs) {
+  cleanupExport();
+  exp.recs = recs;
+  const single = recs.length === 1, r0 = recs[0];
+  const base = single ? `${r0.f.siteName || T.name}_${T.name}` : `${T.name}_調査票まとめ`;
+  $('#exName').value = `${safeName(base)}_${(r0.f.surveyDate || todayStr()).replace(/-/g, '')}`;
+  $('#ex1').checked = true;
+  $('#ex2').checked = single ? !!FIELDS_P2(r0) : true;
+  $$('#exQ button').forEach(b => b.classList.toggle('on', b.dataset.q === exp.q));
+  exSheet.hidden = false;
+  runBuild();
+}
+function opts() { const p = PRESETS[exp.q] || PRESETS.mid; return { p1: $('#ex1').checked, p2: $('#ex2').checked, dpi: p.dpi, q: p.q }; }
+async function runBuild() {
+  const tk = ++exp.token;
+  const st = $('#exStatus'); st.className = 'ex-status'; st.textContent = '作成中…';
+  $('#exShare').disabled = $('#exDl').disabled = true;
+  $('#exThumbs').innerHTML = ''; exp.urls.forEach(u => URL.revokeObjectURL(u)); exp.urls = []; exp.pdf = null;
+  try {
+    const res = await buildPdf(exp.recs, opts(), (i, n) => { if (tk === exp.token) st.textContent = `作成中… ${i} / ${n} ページ`; });
+    if (tk !== exp.token) return;
+    exp.pdf = res;
+    res.pages.forEach(b => {
+      const u = URL.createObjectURL(b); exp.urls.push(u);
+      $('#exThumbs').append(h('img', { src: u, alt: 'ページ', onclick: () => {
+        const lb = h('div', { class: 'lightbox', onclick: () => lb.remove() }, h('img', { src: u })); document.body.append(lb);
+      } }));
+    });
+    const size = res.blob.size;
+    st.textContent = `${res.pages.length}ページ ／ ${fmtSize(size)}`;
+    if (size > 8 * 1048576) { st.classList.add('warn'); st.textContent += '　※メールには大きめです。「軽量」を試してください'; }
+    $('#exShare').disabled = $('#exDl').disabled = false;
+  } catch (e) {
+    if (tk !== exp.token) return;
+    st.className = 'ex-status warn'; st.textContent = e.message || 'PDFを作成できませんでした';
+  }
+}
+function scheduleRebuild() { clearTimeout(exp.timer); exp.timer = setTimeout(runBuild, 250); }
+$('#ex1').addEventListener('change', scheduleRebuild);
+$('#ex2').addEventListener('change', scheduleRebuild);
+$$('#exQ button').forEach(b => b.addEventListener('click', () => {
+  exp.q = b.dataset.q; lsSet('pdfq', exp.q);
+  $$('#exQ button').forEach(x => x.classList.toggle('on', x === b)); scheduleRebuild();
+}));
+const pdfName = () => safeName($('#exName').value || 'survey').replace(/\.pdf$/i, '') + '.pdf';
+$('#exShare').addEventListener('click', async () => {
+  if (!exp.pdf) return;
+  const r = await shareBlob(exp.pdf.blob, pdfName());
+  if (r === 'download') toast('この端末では共有に未対応のため、ダウンロードしました');
+});
+$('#exDl').addEventListener('click', () => { if (exp.pdf) { downloadBlob(exp.pdf.blob, pdfName()); toast('ダウンロードしました（「ファイル」アプリ内）'); } });
+$('#btnPdf').addEventListener('click', async () => { await saveNow(); openExport([rec]); });
+
+/* ================= 起動 ================= */
+(async () => {
+  try {
+    const id = qs.get('id');
+    let r = null;
+    if (id) r = await DB.get(id);
+    if (!r) {
+      const list = await DB.list(typeKey);
+      list.sort((a, b) => b.updated - a.updated);
+      if (list[0]) r = await DB.get(list[0].id);
+    }
+    rec = r ? normalize(r) : newRecord();
+  } catch (e) { dbOK = false; rec = newRecord(); setState('⚠ 保存不可'); }
+  await renderAll();
+  if (rec && dbOK && !isBlank(rec)) setState('✓ 保存済み');
+  window.__app = { get rec() { return rec; }, openExport, buildPdf };  // 動作確認用
+})();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1d4ed8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="災害調査">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<title>災害調査支援ツール</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="hero">
+  <h1>📋 災害調査支援ツール</h1>
+  <p>PROFESSIONAL SUPPORT v<span id="ver"></span></p>
+</header>
+
+<main class="wrap">
+  <div class="tip" id="tip" hidden>
+    <span>📲</span>
+    <span>共有ボタン →「ホーム画面に追加」で、アプリのように使えます（電波がない現場でも動きます）。</span>
+    <button id="tipClose" aria-label="閉じる">✕</button>
+  </div>
+
+  <div class="menu" id="menu"></div>
+
+  <div class="menu" style="margin-top:16px">
+    <section class="cat" style="--cc:#0f766e">
+      <div class="cat-h"><span>📐</span><span>便利ツール</span></div>
+      <a class="item" href="pole_survey.html"><span>📏</span> ポール横断ツール <span class="go">›</span></a>
+      <a class="item" href="calc.html"><span>🔢</span> 現場計算機（勾配・距離） <span class="go">›</span></a>
+    </section>
+  </div>
+
+  <footer class="foot">
+    <p>&copy; 2026 Haru Protocol - Support for Professional Engineer yuki</p>
+    <p style="margin-top:4px">アンバー色の記憶を力に変えて。</p>
+  </footer>
+</main>
+
+<script src="app.js"></script>
+<script>
+  $('#ver').textContent = APP_VERSION;
+  const menu = $('#menu');
+  MENU.forEach(cat => {
+    const sec = h('section', { class: 'cat', style: `--cc:${cat.color}` },
+      h('div', { class: 'cat-h' }, h('span', {}, cat.icon), h('span', {}, cat.title)));
+    cat.items.forEach(([key, label]) => {
+      const badge = h('span', { class: 'badge', hidden: true, 'data-type': key });
+      sec.append(h('a', { class: 'item', href: `survey.html?type=${key}` },
+        h('span', {}, TYPES[key].icon), label, badge, h('span', { class: 'go' }, '›')));
+    });
+    menu.append(sec);
+  });
+
+  // 保存済み件数をバッジ表示
+  (async () => {
+    try {
+      for (const key of Object.keys(TYPES)) {
+        const n = await DB.count(key);
+        if (n > 0) $$(`.badge[data-type="${key}"]`).forEach(b => { b.textContent = n; b.hidden = false; });
+      }
+    } catch (e) { /* 保存領域が使えない場合は無視 */ }
+  })();
+
+  // ホーム画面追加のヒント（未インストール時のみ）
+  const standalone = window.navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  if (!standalone && !lsGet('tipClosed')) $('#tip').hidden = false;
+  $('#tipClose').onclick = () => { $('#tip').hidden = true; lsSet('tipClosed', '1'); };
+</script>
+</body>
+</html>
